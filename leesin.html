@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>직사각형 입력 & 드래그 데모</title>
+  <style>
+    /* 기본 레이아웃 */
+    :root{
+      --palette-gap: 10px;
+      --palette-width: 48px;
+      --palette-left: 12px;
+    }
+    html,body{
+      height:100%;
+      margin:0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      -webkit-user-select: none;
+      user-select: none;
+      overflow: hidden;
+      background: white;
+    }
+
+    /* 배경 격자 (연한 수평/수직 선) */
+    body::before{
+      content:"";
+      position:fixed;
+      inset:0;
+      pointer-events:none;
+      background-image:
+        repeating-linear-gradient(0deg, rgba(0,0,0,0.03) 0 1px, transparent 1px 40px),
+        repeating-linear-gradient(90deg, rgba(0,0,0,0.03) 0 1px, transparent 1px 40px);
+      /* 선 간격: 40px, 선 두께: 1px, 불투명도 낮음 */
+      z-index:0;
+    }
+
+    /* 팔레트 (좌측 세로) */
+    .palette {
+      position:fixed;
+      left: var(--palette-left);
+      top: 50%;
+      transform: translateY(-50%);
+      width: var(--palette-width);
+      display:flex;
+      flex-direction:column;
+      gap: var(--palette-gap);
+      z-index: 30;
+    }
+    .color-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+      border: 2px solid transparent;
+      cursor: pointer;
+    }
+    .color-btn.active {
+      outline: 3px solid rgba(0,0,0,0.08);
+      transform: translateY(-2px);
+      border-color: rgba(0,0,0,0.06);
+    }
+
+    /* 입력 영역 (좌측 상단, 둥근 모서리) */
+    .input-zone {
+      position:fixed;
+      left: calc(var(--palette-left) + var(--palette-width) + 16px);
+      top: 16px;
+      width: 420px;
+      height: 160px;
+      border-radius: 16px;
+      background: rgba(250,250,250,0.95);
+      border: 2px dashed rgba(0,0,0,0.06);
+      padding: 12px;
+      box-sizing: border-box;
+      z-index: 20;
+      display:flex;
+      align-items:flex-start;
+      justify-content:flex-start;
+      gap:8px;
+    }
+    .input-zone.focused {
+      border-style: solid;
+      border-color: rgba(74,118,247,0.5);
+      box-shadow: 0 6px 18px rgba(74,118,247,0.08);
+    }
+    .input-zone .hint{
+      color:#666;
+      font-size:13px;
+    }
+
+    /* 작은 직사각형 (박스) */
+    .box {
+      position: absolute;
+      min-width: 34px;
+      height: 34px;
+      padding: 6px 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+      cursor: grab;
+      user-select: none;
+      z-index: 10;
+      font-size: 15px;
+      color: #111;
+      transition: transform 0.06s ease;
+      white-space: nowrap;
+    }
+    .box:active { cursor: grabbing; transform: scale(0.99); }
+    .box.selected {
+      outline: 3px solid rgba(0,0,0,0.08);
+      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+      z-index: 40;
+    }
+
+    /* 설명 영역 우측 하단 (간단한 툴팁) */
+    .help {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      background: rgba(255,255,255,0.9);
+      padding: 10px 12px;
+      border-radius: 10px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+      font-size: 13px;
+      color:#333;
+      z-index: 30;
+    }
+
+    /* 반응형 간단 처리 */
+    @media (max-width:600px){
+      .input-zone { width: 90%; left: 16px; top: 12px; }
+    }
+  </style>
+</head>
+<body tabindex="0">
+  <!-- 색상 팔레트 (왼쪽 세로) -->
+  <div class="palette" aria-hidden="true">
+    <!-- 7가지 색 -->
+    <div class="color-btn" data-color="#ffffff" style="background:linear-gradient(45deg,#fff,#f0f0f0); box-shadow:none; border:1px solid #ddd;"> </div>
+    <div class="color-btn" data-color="#ffb3b3" style="background:#ffb3b3;"></div>
+    <div class="color-btn" data-color="#ffd9b3" style="background:#ffd9b3;"></div>
+    <div class="color-btn" data-color="#fff59d" style="background:#fff59d;"></div>
+    <div class="color-btn" data-color="#b3ffcf" style="background:#b3ffcf;"></div>
+    <div class="color-btn" data-color="#b3d9ff" style="background:#b3d9ff;"></div>
+    <div class="color-btn" data-color="#d9b3ff" style="background:#d9b3ff;"></div>
+  </div>
+
+  <!-- 입력 영역 (좌측 상단 둥근 사각형) -->
+  <div class="input-zone" id="inputZone" tabindex="0">
+    <div class="hint">
+      여기에서 키보드 입력하면 작은 직사각형(박스)이 만들어집니다.<br>
+      박스를 선택하고 키보드로 입력하면 해당 박스에 글자가 추가됩니다.<br>
+      Backspace로 선택된 박스 삭제.
+    </div>
+  </div>
+
+  <!-- 설명 박스 -->
+  <div class="help">
+    클릭 → 선택, 드래그 → 이동, 색상 클릭 → 선택된 박스 색 변경
+  </div>
+
+  <script>
+    // 주요 DOM
+    const palette = document.querySelector('.palette');
+    const colorButtons = Array.from(document.querySelectorAll('.color-btn'));
+    const inputZone = document.getElementById('inputZone');
+    const body = document.body;
+
+    // 상태
+    let selectedBox = null;
+    let currentColor = '#ffffff'; // 기본
+    let dragState = null;
+
+    // 초기 팔레트: 첫번째를 활성화
+    function setActivePaletteButton(btn) {
+      colorButtons.forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      currentColor = btn ? btn.dataset.color : '#ffffff';
+    }
+    setActivePaletteButton(colorButtons[0]);
+
+    // 팔레트 클릭: 선택된 박스 색 바꾸기
+    palette.addEventListener('click', (e) => {
+      const btn = e.target.closest('.color-btn');
+      if (!btn) return;
+      setActivePaletteButton(btn);
+      if (selectedBox) {
+        selectedBox.style.background = btn.dataset.color;
+        // 텍스트 색 대비 보정 (간단)
+        const c = btn.dataset.color.replace('#','');
+        if (isLightColor(c)) selectedBox.style.color = '#111';
+        else selectedBox.style.color = '#fff';
+      }
+    });
+
+    // 색 밝기 판정 (헥스 문자열, 예: "ffffff" 또는 "fff")
+    function isLightColor(hex) {
+      if (!hex) return true;
+      if (hex.length === 3) hex = hex.split('').map(ch=>ch+ch).join('');
+      const r = parseInt(hex.substr(0,2),16);
+      const g = parseInt(hex.substr(2,2),16);
+      const b = parseInt(hex.substr(4,2),16);
+      // YIQ formula
+      const yiq = (r*299 + g*587 + b*114)/1000;
+      return yiq > 200;
+    }
+
+    // 클릭으로 박스 선택
+    function selectBox(box) {
+      if (selectedBox === box) return;
+      if (selectedBox) selectedBox.classList.remove('selected');
+      selectedBox = box;
+      if (selectedBox) selectedBox.classList.add('selected');
+    }
+
+    // 클릭 영역 외 클릭 시 선택 해제
+    document.addEventListener('pointerdown', (e) => {
+      // if clicked on a box or palette or inputZone => handled elsewhere
+      const onBox = e.target.closest('.box');
+      const onPalette = e.target.closest('.palette');
+      const onInput = e.target.closest('#inputZone');
+      if (!onBox && !onPalette) {
+        // 클릭 위치가 box가 아니면 선택 해제
+        if (selectedBox && !onBox) {
+          selectedBox.classList.remove('selected');
+          selectedBox = null;
+        }
+      }
+      // focus 관리: inputZone 클릭하면 포커스
+      if (onInput) {
+        inputZone.classList.add('focused');
+      } else {
+        inputZone.classList.remove('focused');
+      }
+    });
+
+    // 바디 클릭으로 포커스 유지 (키 입력 받게)
+    body.addEventListener('click', () => {
+      body.focus();
+    });
+
+    // 박스 생성 함수
+    let boxCounter = 0;
+    function createBoxWithChar(char, x=null, y=null, color=null) {
+      const el = document.createElement('div');
+      el.className = 'box';
+      el.textContent = char;
+      el.dataset.id = (++boxCounter);
+      el.style.left = (x !== null ? x + 'px' : (inputZone.getBoundingClientRect().left + 16) + 'px');
+      el.style.top = (y !== null ? y + 'px' : (inputZone.getBoundingClientRect().top + 16) + 'px');
+      const bg = color || currentColor || '#fff';
+      el.style.background = bg;
+      el.style.color = isLightColor(bg.replace('#','')) ? '#111' : '#111'; // 기본 검정
+      document.body.appendChild(el);
+
+      // 이벤트: 클릭(선택), 드래그
+      el.addEventListener('pointerdown', boxPointerDown);
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        selectBox(el);
+      });
+      return el;
+    }
+
+    // 드래그 구현 (pointer events)
+    function boxPointerDown(e) {
+      const el = e.currentTarget;
+      e.preventDefault();
+      // bring to front for dragging
+      el.style.zIndex = 1000;
+      selectBox(el);
+      el.setPointerCapture(e.pointerId);
+
+      const startRect = el.getBoundingClientRect();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const origLeft = startRect.left;
+      const origTop = startRect.top;
+
+      dragState = {
+        el, pointerId: e.pointerId,
+        offsetX: startX - origLeft,
+        offsetY: startY - origTop
+      };
+
+      function onPointerMove(ev) {
+        if (!dragState || dragState.pointerId !== ev.pointerId) return;
+        const nx = ev.clientX - dragState.offsetX;
+        const ny = ev.clientY - dragState.offsetY;
+        // 문서영역에 맞춰 제한(옵션)
+        const w = el.offsetWidth, h = el.offsetHeight;
+        const maxX = document.documentElement.clientWidth - w;
+        const maxY = document.documentElement.clientHeight - h;
+        el.style.left = Math.max(0, Math.min(maxX, nx)) + 'px';
+        el.style.top = Math.max(0, Math.min(maxY, ny)) + 'px';
+      }
+
+      function onPointerUp(ev) {
+        if (!dragState || dragState.pointerId !== ev.pointerId) return;
+        el.releasePointerCapture(ev.pointerId);
+        el.style.zIndex = 10;
+        dragState = null;
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        // 드래그 끝난 뒤 선택 상태 유지
+        selectBox(el);
+      }
+
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+    }
+
+    // helper: 박스가 입력 영역 안에 있는지 확인 (중심점 기준)
+    function isBoxInsideInputZone(boxEl) {
+      if (!boxEl) return false;
+      const boxRect = boxEl.getBoundingClientRect();
+      const zoneRect = inputZone.getBoundingClientRect();
+      const cx = boxRect.left + boxRect.width/2;
+      const cy = boxRect.top + boxRect.height/2;
+      return (cx >= zoneRect.left && cx <= zoneRect.right && cy >= zoneRect.top && cy <= zoneRect.bottom);
+    }
+
+    // 키보드 입력 처리
+    document.addEventListener('keydown', (e) => {
+      // Backspace: 선택된 박스가 있으면 삭제
+      if (e.key === 'Backspace') {
+        if (selectedBox) {
+          e.preventDefault();
+          selectedBox.remove();
+          selectedBox = null;
+          return;
+        }
+      }
+      // Enter는 무시(선택된 박스에 줄바꿈 지원하지 않음)
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        return;
+      }
+      // 만약 컨테이너가 포커스되어 있지 않다면, 기본적으로 입력은 무시
+      const zoneFocused = document.activeElement === inputZone || inputZone.classList.contains('focused') || elementIsUnderPointerInZone();
+      // 허용되는 키: 문자, 공백 (한 글자)
+      let char = null;
+      if (e.key.length === 1) {
+        char = e.key;
+      } else if (e.code === 'Space') {
+        char = ' ';
+      }
+
+      if (!char) return; // 다른 키는 무시
+
+      // 시나리오:
+      // 1) selectedBox && selectedBox is inside inputZone -> append 글자 to that box
+      // 2) else if inputZone focused -> create new box at a position inside inputZone
+      // 3) else -> 무시 (박스가 inputZone 밖에 있을 땐 입력 불가)
+      if (selectedBox && isBoxInsideInputZone(selectedBox)) {
+        // append char
+        e.preventDefault();
+        selectedBox.textContent += char;
+        return;
+      }
+
+      if (zoneFocused) {
+        e.preventDefault();
+        // create new box at a random-ish position inside inputZone
+        const zoneRect = inputZone.getBoundingClientRect();
+        // 위치: zone의 좌상단 + 약간의 랜덤 offset
+        const offsetX = 12 + Math.floor(Math.random()*Math.max(1, zoneRect.width - 80));
+        const offsetY = 12 + Math.floor(Math.random()*Math.max(1, zoneRect.height - 40));
+        const x = Math.max(8, Math.min(window.innerWidth - 60, zoneRect.left + offsetX));
+        const y = Math.max(8, Math.min(window.innerHeight - 40, zoneRect.top + offsetY));
+        const newBox = createBoxWithChar(char, x, y, currentColor);
+        selectBox(newBox);
+      } else {
+        // 입력 영역 밖이라서 무시
+        // (원하면 소리/효과 추가 가능)
+      }
+    });
+
+    // helper: 포인터가 inputZone 내부에 있는지 체크 (최근 포인터 위치)
+    let lastPointerPos = {x:0,y:0};
+    window.addEventListener('pointermove', (e)=>{
+      lastPointerPos.x = e.clientX;
+      lastPointerPos.y = e.clientY;
+    });
+    function elementIsUnderPointerInZone() {
+      const el = document.elementFromPoint(lastPointerPos.x, lastPointerPos.y);
+      return el && inputZone.contains(el);
+    }
+
+    // inputZone 포커스/블러 관리 (클릭할 때 포커스)
+    inputZone.addEventListener('click', (e) => {
+      inputZone.classList.add('focused');
+      inputZone.focus();
+      e.stopPropagation();
+    });
+    // 바디 클릭하면 inputZone 포커스 해제 (위에서 처리)
+    document.addEventListener('click', (e) => {
+      if (!inputZone.contains(e.target)) {
+        inputZone.classList.remove('focused');
+      }
+    });
+
+    // 페이지 로드시 기본 박스 예시 (옵션)
+    // createBoxWithChar('A', inputZone.getBoundingClientRect().left + 20, inputZone.getBoundingClientRect().top + 20, '#ffd9b3');
+
+    // 터치에서도 Backspace 등 키 입력이 가능하려면 화면 키보드가 떠야 함 (모바일에선 동작 차이 있을 수 있음)
+    // 끝.
+  </script>
+</body>
+</html>
